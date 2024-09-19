@@ -18,6 +18,19 @@ def sampv0(d):
 
     return v
 
+def sampv0_c(d):
+
+    for i in range(100):
+
+        v = np.zeros(d)
+
+        while np.linalg.norm(v) < 1e-4:
+            v = np.random.randn(d) + 1j*np.random.randn(d)
+        
+        v = v/np.linalg.norm(v)
+
+    return v
+
 def sampx(v,nor):
 
     d = np.size(v)
@@ -31,6 +44,19 @@ def sampx(v,nor):
 
     return x
 
+def sampx_c(v,nor):
+
+    d = np.size(v)
+
+    x = np.random.randn(d) + 1j*np.random.randn(d)
+
+    #x = x - (np.sum(v*x))/(np.sum(v*v))*v
+    x = x - (np.sum(v.conjugate*x))*v
+    if nor == 1:
+        x = x/np.linalg.norm(x)
+
+    return x
+
 '''
     help functions
 '''
@@ -38,6 +64,10 @@ def sampx(v,nor):
 def onediff(a,b,tau):
 
     return -a*tau**2 + b*tau + a
+
+def onediffdouble(a,b,c,d,tau,sig):
+
+    return b + sig*d - tau*(a + sig*c), c + tau*d - sig*(a + tau*b)
 
 def secdiff(a,b,tau):
 
@@ -83,9 +113,27 @@ def stepsize(a, b, x=1):
 
 def funcAV(A, V, v, u):
 
+    # < u, (A - V), v >  = <u, A v> - <V^* u, v>
+
     k = np.sum(u*np.dot(A,v)) - np.sum(v*np.dot(V,u))
 
     return k
+
+def CheckHessian(a,b,c,d,tau,sig):
+
+    q11 = -(a + sig*c)*(1 - 2*tau**2) - (b + sig*d)*3*tau
+    q12 = d - tau*c - (b - tau*a)*sig
+    q21 = d - sig*b - (c - sig*a)*tau
+    q22 = -(a + tau*b)*(1 - 2*sig**2) - (c + tau*d)*3*sig
+
+    # print(q11, q22, q11*q22 - q12**2)
+
+    if q11 - 1e-10 < 0 and q11*q22 - q12**2 + 1e-10 > 0:
+        return True
+    if q11 - 1e-10 < 0 and q11*q22 - q21**2 + 1e-10 > 0:
+        return True
+    else:
+        return False
 
 '''
     main algorithm
@@ -191,7 +239,15 @@ def MatFreeAdjNorm(A, iter, eps, nor=1):
     d,d = np.shape(A)
 
     # valsol = np.max(np.linalg.eigh(np.transpose(A)@A)[0])
-    valsol = scipy.sparse.linalg.eigs(np.transpose(np.conjugate(A))@A, k=1, which='LM')[0]
+    if d == 1:
+        print('||A|| = ', np.linalg.norm(A))
+        return A / np.linalg.norm(A), A / np.linalg.norm(A), np.linalg.norm(A), 0, 0, 0
+    if 1001 > d > 10:
+        valsol = scipy.sparse.linalg.eigs(np.transpose(np.conjugate(A))@A, k=1, which='LM')[0]
+    elif d > 1000:
+        valsol = 0
+    else:
+        valsol = np.max(np.linalg.eig(np.transpose(np.conjugate(A))@A)[0])
 
     funcval = []
     listtau = []
@@ -256,6 +312,82 @@ def MatFreeAdjNorm(A, iter, eps, nor=1):
 
     return v, optv, funcval, listtau, lista, listerror
 
+def MatFreeAdjNormCont(A, iter, eps, dim, nor=1, pr=1000):
+
+    d = dim
+
+    funcval = []
+    listtau = []
+    listerror = []
+    lista = []
+    k = 1
+
+    print('iter. \t| func-value \t| tau  \t\t| alpha \t| beta  \t| h^(1)(tau) \t| h^(2)(tau) \t| update \t| error')
+    print('----------------------------------------------------------------------------------------------------------------------------------------------')
+
+    '''
+        Initialisation
+    '''
+    v = sampv0(d)
+    # if comp == 1:
+    #     v = sampv0_c(d)
+    # v = np.ones(d)
+    # v = v / np.linalg.norm(v)
+    funcval = np.append(funcval, np.linalg.norm(A(v))**2)
+    optv = v
+
+    print(0, '\t|', "%10.3e"%(np.linalg.norm(A(v))**2), '\t|', "---", '\t\t|', "---", '\t\t|', "---", '\t\t|', "---", '\t\t|', "---", '\t\t|', "---", '\t\t|', "---")
+
+    v1 = v.copy()
+    x = sampx(v.copy(),nor)
+    # if comp == 1:
+    #     x = sampx_c(v.copy(),nor)
+    a = np.real(np.sum(A(v) * A(x).conjugate()))
+
+    while np.abs(a) > eps and k < iter:
+
+        v1 = v.copy()
+
+        b = np.linalg.norm(A(x))**2 - np.linalg.norm(A(v))**2
+        # if nor == 0:
+            # b = gen_b_A(A, np.linalg.norm(x)**2 * v, x)
+            # b = np.linalg.norm(np.dot(A, x.copy()))**2 - np.linalg.norm(x)**2*np.linalg.norm(np.dot(A, v.copy()))**2
+        
+        tau = stepsize(a, b)
+        if nor == 0:
+            tau = stepsize(a, b, x)
+
+        v = update_v(v, tau, x)
+
+        lista = np.append(lista, a)
+        listtau = np.append(listtau, tau)
+        listerror = np.append(listerror, np.linalg.norm(v - v1))
+        funcval = np.append(funcval, np.linalg.norm(np.abs(A(v)))**2 )
+        funcopt = np.max(funcval)
+        
+        if funcval[k] == funcopt:
+            optv = v.copy()
+            up = 1
+
+        if np.mod(k,pr) == 0:
+            print(k, '\t|', "%10.3e"%(funcval[k]), '\t|', "%10.3e"%(tau), '\t|', "%10.3e"%(a), '\t|', "%10.3e"%(b), '\t|', "%10.3e"%(onediff(a,b,tau)), '\t|', "%10.3e"%(secdiff(a,b,tau)), '\t|', up, '\t\t|', "%10.3e"%(np.linalg.norm(v1 - v)))
+
+        k += 1
+        x = sampx(v.copy(),nor)
+        # if comp == 1:
+        #     x = sampx_c(v.copy(),nor)
+        a = np.real(np.sum(A(x) * A(v).conjugate()))
+
+            
+    if k == 1:
+        print('A is orthogonal/unitar with ||A||^2 = ', np.linalg.norm(np.abs(A(v)))**2, 'a_0 = ', a)
+    else:
+        print(k-1, '\t|', "%10.3e"%(funcval[k-1]), '\t|', "%10.3e"%(tau), '\t|', "%10.3e"%(a), '\t|', "%10.3e"%(b), '\t|', "%10.3e"%(onediff(a,b,tau)), '\t|', "%10.3e"%(secdiff(a,b,tau)), '\t|', up, '\t\t|', "%10.3e"%(np.linalg.norm(v1 - v)))
+        print('||A||^2 = ', np.linalg.norm(np.abs(A(v)))**2)
+
+
+    return v, optv, funcval, listtau, lista, listerror
+
 
 def MatFreeAdjOpNorm(A, V, iter, eps=1e-7, nor=1):
 
@@ -291,7 +423,7 @@ def MatFreeAdjOpNorm(A, V, iter, eps=1e-7, nor=1):
     w = sampx(u.copy(),nor=1)
     a = np.sum(u*np.dot(A,x)) - np.sum(x*np.dot(V,u)) + np.sum(w*np.dot(A,v)) - np.sum(v*np.dot(V,w))
 
-    while np.abs(a) > eps:
+    while np.abs(a) > eps and k < iter:
 
         v1 = v.copy()
         u1 = u.copy()
@@ -339,6 +471,157 @@ def MatFreeAdjOpNorm(A, V, iter, eps=1e-7, nor=1):
     else:
         print(k-1, '\t|', "%10.3e"%(funcval[k-1]), '\t|', "%10.3e"%(np.abs(funcval[k-1] - valsol)), '\t|', "%10.3e"%(tau), '\t|', "%10.3e"%(a), '\t|', "%10.3e"%(b), '\t|', "%10.3e"%(onediff(a,b,tau)), '\t|', "%10.3e"%(secdiff(a,b,tau)), '\t|', up, '\t\t|', "%10.3e"%(np.linalg.norm(v1 - v) + np.linalg.norm(u1 - u)), '\t|', "%10.3e"%np.linalg.norm(u - np.dot(A - V.T, v)/np.linalg.norm(np.dot(A - V.T, v))))
         print('||A||^2 = ', funcAV(A, V, v, u)**2)
+
+    return v, optv, funcval, listtau, lista, listerror
+
+def MatFreeAdjOpNormDouble(A, V, iter, eps=1e-7, nor=1):
+
+    d,p = np.shape(A)
+    if np.shape(A) != np.shape(V.T):
+        print('dimensions does not fit!')
+
+    # valsol = np.max(np.linalg.eigh(np.transpose(A - V.T)@(A - V.T))[0])
+    valsol = np.sqrt(scipy.sparse.linalg.eigs(np.transpose(np.conjugate(A - V.T))@(A - V.T), k=1, which='LM')[0])
+
+    funcval = []
+    listtau = []
+    listerror = []
+    lista = []
+    k = 1
+
+    print('iter. \t| func-value \t| res.  \t| tau+sig  \t| alpha \t| beta \t\t| gamma \t| delta \t| q^(1)(tau,sig) \t| q^(2)(tau, sig) \t| sample \t| error \t| sing-vec')
+    print('-------------------------------------------------------------------------------------------------------------------------------------------------------------------')
+
+    '''
+        Initzilisation
+    '''
+    v = sampv0(p)
+    u = sampv0(d)
+    funcval = np.append(funcval, funcAV(A, V, v, u))
+    
+    print(0, '\t|', "%10.3e"%(funcAV(A, V, v, u)), '\t|', "%10.3e"%(np.abs(funcAV(A, V, v, u) - valsol)), '\t|', "---", '\t\t|', "---", '\t\t|', "---", '\t\t|', "---", '\t\t|', "---", '\t\t|', "---", '\t\t|', "---", '\t\t\t|', "---", '\t\t\t|', "---", '\t\t|', "---")
+
+    while k < iter:
+
+        v1 = v.copy()
+        u1 = u.copy()
+        x = sampx(v.copy(),nor=1)
+        w = sampx(u.copy(),nor=1)
+
+        a = np.sum(u * np.dot(A, v)) - np.sum(np.dot(V, u) * v)
+        b = np.sum(w * np.dot(A, v)) - np.sum(np.dot(V, w) * v)
+        c = np.sum(u * np.dot(A, x)) - np.sum(np.dot(V, u) * x)
+        d = np.sum(w * np.dot(A, x)) - np.sum(np.dot(V, w) * x)
+            
+        sig1 = -(a**2 + b**2 - c**2 - d**2) / 2 / (a*c + b*d) + np.sqrt((a**2 + b**2 - c**2 - d**2)**2 / 4 / (a*c + b*d)**2 + 1)
+        sig2 = -(a**2 + b**2 - c**2 - d**2) / 2 / (a*c + b*d) - np.sqrt((a**2 + b**2 - c**2 - d**2)**2 / 4 / (a*c + b*d)**2 + 1)
+
+        tau11 = (b + sig1*d) / (a + sig1*c)
+        tau12 = (b + sig2*d) / (a + sig2*c)
+
+        tau1 = -(a**2 - b**2 + c**2 - d**2) / 2 / (a*b + c*d) + np.sqrt((a**2 - b**2 + c**2 - d**2)**2 / 4 / (a*b + c*d)**2 + 1)
+        tau2 = -(a**2 - b**2 + c**2 - d**2) / 2 / (a*b + c*d) - np.sqrt((a**2 - b**2 + c**2 - d**2)**2 / 4 / (a*b + c*d)**2 + 1)
+
+        sig11 = (c + tau1*d) / (a + tau1*b)
+        sig12 = (c + tau2*d) / (a + tau2*b)
+
+        # print(onediffdouble(a,b,c,d,tau11,sig1), onediffdouble(a,b,c,d,tau12,sig2), onediffdouble(a,b,c,d,tau1,sig11), onediffdouble(a,b,c,d,tau2,sig12))
+
+        # print(funcAV(A, V, v, u), funcAV(A, V, (v + sig1*x)/np.linalg.norm(v + sig1*x), (u + tau11*w)/np.linalg.norm(u + tau11*w)))
+        # print(funcAV(A, V, v, u), funcAV(A, V, (v + sig2*x)/np.linalg.norm(v + sig2*x), (u + tau12*w)/np.linalg.norm(u + tau12*w)))
+        # print(funcAV(A, V, v, u), funcAV(A, V, (v + sig11*x)/np.linalg.norm(v + sig11*x), (u + tau11*w)/np.linalg.norm(u + tau1*w)))
+        # print(funcAV(A, V, v, u), funcAV(A, V, (v + sig12*x)/np.linalg.norm(v + sig12*x), (u + tau11*w)/np.linalg.norm(u + tau2*w)))
+
+        Tau = [tau11, tau12, tau1, tau2]
+        Sig = [sig1, sig2, sig11, sig12]
+
+        val = []
+        check_one_diff = []
+
+        for l in range(4):
+            val.append(funcAV(A, V, (v + Sig[l]*x)/np.linalg.norm(v + Sig[l]*x), (u + Tau[l]*w)/np.linalg.norm(u + Tau[l]*w)))
+            check_one_diff.append(onediffdouble(a,b,c,d,Tau[l],Sig[l]))
+        
+        # print(check_one_diff)
+        # print(val)
+        l_final = np.argmax(val)
+
+        tau = Tau[l_final]
+        sig = Sig[l_final]
+
+        if funcAV(A, V, v, u) > np.max(val):
+            print('Fail-value')
+            print(np.sum(np.abs(check_one_diff)))
+            print(funcAV(A, V, v, u), '??? > ???',val)
+        if np.sum(np.abs(check_one_diff)) > 1e-5:
+            print('Fail-diff')
+            print(np.sum(np.abs(check_one_diff)))
+            print(funcAV(A, V, v, u), '??? > ???',val)
+            # print(check_one_diff)
+
+        '''if CheckHessian(a,b,c,d,tau11,sig1) == True:
+            tau = tau11
+            sig = sig1
+            # print('True-1')
+        elif CheckHessian(a,b,c,d,tau12,sig2) == True:
+            tau = tau12
+            sig = sig2
+            # print('True-2')
+        elif CheckHessian(a,b,c,d,tau1,sig11) == True:
+            tau = tau1
+            sig = sig11
+            # print('True-3')
+        elif CheckHessian(a,b,c,d,tau2,sig12) == True:
+            tau = tau2
+            sig = sig12
+            # print('True-3')
+        else:
+            print('Fail', k)
+            tau = Tau[l_final]
+            sig = Sig[l_final]
+
+            if funcAV(A, V, v, u) > np.max(val):
+                print('Fail-value')
+                print(funcAV(A, V, v, u), '??? > ???',val)
+            if np.sum(np.abs(check_one_diff)) > 1e-5:
+                print('Fail-diff')
+                print(np.sum(np.abs(check_one_diff)))
+                # print(check_one_diff)'''
+
+        vg = v + sig * x
+        ug = u + tau * w
+
+        v = vg.copy()/np.linalg.norm(vg.copy())
+        u = ug.copy()/np.linalg.norm(ug.copy())
+
+        lista = np.append(lista, a)
+        listtau = np.append(listtau, tau)
+        listerror = np.append(listerror, np.linalg.norm(v - v1) + np.linalg.norm(u - u1))
+        funcval = np.append(funcval, funcAV(A, V, v, u))
+        funcopt = np.max(funcval)
+        up = 0
+        
+        if funcval[k] == funcopt:
+            optv = v.copy()
+            optu = u.copy()
+            up = 1
+
+
+        if np.mod(k,1000) == 0:
+            print(k, '\t|', "%10.3e"%(funcval[k]), '\t|', "%10.3e"%(np.abs(funcval[k] - valsol)), '\t|', "%10.3e"%(tau+sig), '\t|', "%10.3e"%(a), '\t|', "%10.3e"%(b), '\t|',  "%10.3e"%(c), '\t|',  "%10.3e"%(d), '\t|', "%10.3e"%(np.linalg.norm(onediffdouble(a,b,c,d,tau,sig))), '\t\t|', "%10.3e"%(CheckHessian(a,b,c,d,tau,sig)), '\t\t|', up, '\t\t|', "%10.3e"%(np.linalg.norm(v1 - v) + np.linalg.norm(u1 - u)), '\t|', "%10.3e"%np.linalg.norm(u - np.dot(A - V.T, v)/np.linalg.norm(np.dot(A - V.T, v))))
+
+        k += 1
+        x = sampx(v.copy(),nor=1)
+        w = sampx(u.copy(),nor=1)
+        a = np.sum(u*np.dot(A,x)) - np.sum(x*np.dot(V,u)) + np.sum(w*np.dot(A,v)) - np.sum(v*np.dot(V,w))
+
+    print(k-1, '\t|', "%10.3e"%(funcval[k-1]), '\t|', "%10.3e"%(np.abs(funcval[k-1] - valsol)), '\t|', "%10.3e"%(tau + sig), '\t|', "%10.3e"%(a), '\t|', "%10.3e"%(b), '\t|', "%10.3e"%(c), '\t|', "%10.3e"%(d), '\t|', "%10.3e"%(onediff(a,b,tau)), '\t|', "%10.3e"%(secdiff(a,b,tau)), '\t|', up, '\t\t|', "%10.3e"%(np.linalg.norm(v1 - v) + np.linalg.norm(u1 - u)), '\t|', "%10.3e"%np.linalg.norm(u - np.dot(A - V.T, v)/np.linalg.norm(np.dot(A - V.T, v))))
+
+    if k == 1:
+        print('A is orthogonal/unitar with ||A||^2 = ', funcAV(A, V, v, u), 'a_0 = ', a)
+    else:
+        print(k-1, '\t|', "%10.3e"%(funcval[k-1]), '\t|', "%10.3e"%(np.abs(funcval[k-1] - valsol)), '\t|', "%10.3e"%(tau+sig), '\t|', "%10.3e"%(a), '\t|', "%10.3e"%(b), '\t|', "%10.3e"%(c), '\t|',"%10.3e"%(d), '\t|', "%10.3e"%(onediff(a,b,tau)), '\t|', "%10.3e"%(secdiff(a,b,tau)), '\t|', up, '\t\t|', "%10.3e"%(np.linalg.norm(v1 - v) + np.linalg.norm(u1 - u)), '\t|', "%10.3e"%np.linalg.norm(u - np.dot(A - V.T, v)/np.linalg.norm(np.dot(A - V.T, v))))
+        print('||A||^2 = ', funcAV(A, V, v, u))
 
     return v, optv, funcval, listtau, lista, listerror
 
@@ -440,3 +723,19 @@ def MatFreeAdjOpNormEntire(A, V, iter, br, eps, nor):
 
 
     return v, optv, funcval, valsol, listtau, lista, listerror
+
+def power_iter(Op, iter=1000):
+    n,m = np.shape(Op)
+    A = np.matmul(Op.T , Op)
+    v0 = np.random.randn(m)
+    v = np.random.randn(m)
+
+    #while np.linalg.norm(v0 - v) < 1e-10:
+    for i in range(iter):
+        v0 = v
+
+        v = A @ v
+
+        v = v /np.linalg.norm(v)
+        
+    return v
