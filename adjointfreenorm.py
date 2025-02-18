@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import scipy
 
 '''
-    smapling and help functions
+    sampling and help functions
 '''
 def samp_initial(d):
 
@@ -197,7 +197,7 @@ def MatFreeAdjNorm(A, iter, eps, nor=1, show=0):
         print('------------------------------------------------------------------------------------------------------------------------------------------------------')
 
     '''
-        Initialisation
+        Initialization
     '''
     v = samp_initial(d)
     funcval = np.append(funcval, funcA(A, v))
@@ -373,7 +373,7 @@ def MatFreeAdjOpNormDouble(A, V=np.zeros(1), iter=10000, eps=1e-7, show=0):
         print('-------------------------------------------------------------------------------------------------------------------------------------------------------------------')
 
     '''
-        Initzilisation
+        Initialization
     '''
     v = samp_initial(p)
     u = samp_initial(d)
