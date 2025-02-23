@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import scipy
 
 '''
-    sampling and help functions
+    smapling and help functions
 '''
 def samp_initial(d):
 
@@ -197,7 +197,7 @@ def MatFreeAdjNorm(A, iter, eps, nor=1, show=0):
         print('------------------------------------------------------------------------------------------------------------------------------------------------------')
 
     '''
-        Initialization
+        Initialisation
     '''
     v = samp_initial(d)
     funcval = np.append(funcval, funcA(A, v))
@@ -266,6 +266,7 @@ def MatFreeAdjOpNorm(A, V=np.zeros(1), iter=10000, eps=1e-7, show=0):
         print('dimensions does not fit!')
 
     valsol = np.sqrt(scipy.sparse.linalg.eigs(np.transpose(np.conjugate(A - V.T))@(A - V.T), k=1, which='LM')[0])
+    valsol = np.max(np.abs(valsol))
 
     funcval = []
     listtau = []
@@ -351,6 +352,7 @@ def MatFreeAdjOpNormDouble(A, V=np.zeros(1), iter=10000, eps=1e-7, show=0):
         print('dimensions does not fit!')
 
     valsol = np.sqrt(scipy.sparse.linalg.eigs(np.transpose(np.conjugate(A - V.T))@(A - V.T), k=1, which='LM')[0])
+    valsol = np.max(np.abs(valsol))
 
     funcval = []
     listtau = []
@@ -373,7 +375,7 @@ def MatFreeAdjOpNormDouble(A, V=np.zeros(1), iter=10000, eps=1e-7, show=0):
         print('-------------------------------------------------------------------------------------------------------------------------------------------------------------------')
 
     '''
-        Initialization
+        Initzilisation
     '''
     v = samp_initial(p)
     u = samp_initial(d)
@@ -431,7 +433,7 @@ def MatFreeAdjOpNormDouble(A, V=np.zeros(1), iter=10000, eps=1e-7, show=0):
     if k == 1:
         optu = u.copy()
         optv = v.copy()
-        print('A = V with ||A - V|| = ', "%10.7e"%np.abs(funcAV(A, V, v, u)), '\t| with a_0 = ', "%10.7e"%a)
+        print('A = V with ||A - V|| = ', "%10.7e"%np.abs(funcAV(A, V, v, u)), '\t| with b_0 + c_0 = ', "%10.7e"%(b+c))
     else:
         if show == 0:
             print('iter. \t| func-value \t| residuum \t| sing-vec-error')
