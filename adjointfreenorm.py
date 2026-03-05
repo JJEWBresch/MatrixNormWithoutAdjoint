@@ -322,7 +322,7 @@ def MatFreeAdjOpNorm(A, V=np.zeros(1), iter=10000, eps=1e-7, show=0):
             up = 1
 
 
-        if np.mod(k,1000) == 0 and show == 1:
+        if (np.mod(k,1000) == 0 or 1 <= k <= 10) and show == 1:
             print(k, '\t|', "%10.3e"%(funcval[k]), '\t|', "%10.3e"%(np.abs(funcval[k] - valsol)), '\t|', "%10.3e"%(tau), '\t|', "%10.3e"%(a), '\t|', "%10.3e"%(b), '\t|', "%10.3e"%(first_diff_A(a,b,tau)), '\t|', "%10.3e"%(second_diff_A(a,b,tau)), '\t|', up, '\t\t|', "%10.3e"%(np.linalg.norm(v1 - v) + np.linalg.norm(u1 - u)), '\t|', "%10.3e"%np.minimum(np.linalg.norm(u - np.dot(A - V.T, v)/np.linalg.norm(np.dot(A - V.T, v))), 2-np.linalg.norm(u - np.dot(A - V.T, v)/np.linalg.norm(np.dot(A - V.T, v)))))
 
         k += 1
@@ -438,6 +438,135 @@ def MatFreeAdjOpNormDouble(A, V=np.zeros(1), iter=10000, eps=1e-7, show=0):
         if show == 0:
             print('iter. \t| func-value \t| residuum \t| sing-vec-error')
             print(k-1, '\t|', "%10.3e"%(funcval[k-1]), '\t|', "%10.3e"%(np.abs(np.abs(funcval[k-1]) - valsol)), '\t|', "%10.3e"%np.minimum(np.linalg.norm(u - np.dot(A - V.T, v)/np.linalg.norm(np.dot(A - V.T, v))), 2-np.linalg.norm(u - np.dot(A - V.T, v)/np.linalg.norm(np.dot(A - V.T, v)))))
+        print('||A|| = ', np.abs(funcAV(A, V, v, u)))
+
+    return u, v, valsol, optu, optv, funcval, listtau, listabcd, listbc, listerror, listapprox1, listapprox2, listapprox2min, listapprox3
+
+
+
+
+
+def ZeroOrderMatFreeAdjOpNormDouble(A, V=np.zeros(1), iter=1000, eps=1e-7, show=0,  k=1):
+
+    if np.all(V==0):
+        V = np.zeros(np.shape(A.T))
+
+    m,p = np.shape(A)
+    if np.shape(A) != np.shape(V.T):
+        print('dimensions does not fit!')
+
+    valsol = np.sqrt(scipy.sparse.linalg.eigs(np.transpose(np.conjugate(A - V.T))@(A - V.T), k=1, which='LM')[0])
+    valsol = np.max(np.abs(valsol))
+
+    funcval = []
+    listtau = []
+    listerror = []
+    listabcd = []
+    listbc = []
+    approx = 0
+    listapprox1 = []
+    listapprox2 = []
+    listapprox2min = []
+    listapprox3 = []
+    k_iter = 1
+
+    if m <= 100 and p <= 100:
+        approx = 1
+        AVop = (A - V.T).T@(A - V.T)
+
+    if show == 1:
+        print('iter. \t| func-value \t| res.  \t| tau+sig  \t| alpha \t| beta \t\t| gamma \t| delta \t| q^(1)(tau,sig) \t| q^(2)(tau, sig) \t| sample \t| error \t| sing-vec')
+        print('-------------------------------------------------------------------------------------------------------------------------------------------------------------------')
+
+    '''
+        Initzilisation
+    '''
+    v = samp_initial(p)
+    Av = A@v
+    u = samp_initial(m)
+    Vu = V@u
+    funcval = np.append(funcval, funcAV(A, V, v, u))
+    
+    if show == 1:
+        print(0, '\t|', "%10.3e"%(funcval[0]), '\t|', "%10.3e"%(np.abs(funcval[0] - valsol)), '\t|', "---", '\t\t|', "---", '\t\t|', "---", '\t\t|', "---", '\t\t|', "---", '\t\t|', "---", '\t\t\t|', "---", '\t\t\t|', "---", '\t\t|', "---", '\t\t|', "---")
+
+    #x = samp_orthogonal(v.copy())
+    #w = samp_orthogonal(u.copy())
+    #b, c = gen_bc_AV(A, V, u, w, v, x)
+
+    while k_iter < iter+1: #np.abs(np.abs(b) + np.abs(c)) > eps and k_iter < iter+1:
+
+        X = np.random.randn(p,k)
+        P = np.eye(p) - np.matrix(v).T@np.matrix(v)
+        PX = P @ X
+
+        x = PX/np.sqrt(np.sum(np.array(PX)**2,0))
+        Ax = A@x
+        c = (Ax.T@u - Vu.T@x).T
+
+        Y = np.random.randn(m,k)
+        Q = np.eye(m) - np.matrix(u).T@np.matrix(u)
+        QY = Q @ Y
+
+        w = QY/np.sqrt(np.sum(np.array(QY)**2,0))
+        Vw = V@w
+        b = (w.T@Av - Vw.T@v).T
+
+        xx = x @ c
+        x = xx/np.linalg.norm(xx)
+        x = np.reshape(np.array(x),-1)
+
+        ww = w @ b
+        w = ww/np.linalg.norm(ww)
+        w = np.reshape(np.array(w),-1)
+
+
+
+        a, d = gen_ad_AV(A, V, u, w, v, x)
+        b, c = gen_bc_AV(A, V, u, w, v, x)
+        
+        if approx == 1:
+            listapprox1 = np.append(listapprox1, np.linalg.norm(AVop@v - np.linalg.norm((A - V.T)@v)*np.linalg.norm((A.T - V)@u)*v))
+
+        v1 = v.copy()
+        u1 = u.copy()
+
+        if approx == 1:
+            listapprox2 = np.append(listapprox2, np.linalg.norm(AVop@v - a**2*v))
+            listapprox2min = np.append(listapprox2min, np.min(listapprox2))
+            listapprox3 = np.append(listapprox3, np.linalg.norm(AVop@v))
+
+        tau, sig = stepsize_AV_double(a, b, c, d)
+
+        v = update_step(v, sig, x)
+        u = update_step(u, tau, w)
+
+        listabcd = np.append(listabcd, a*b + c*d)
+        listbc = np.append(listbc, np.abs(b) + np.abs(c))
+        listtau = np.append(listtau, tau)
+        listerror = np.append(listerror, np.linalg.norm(v - v1) + np.linalg.norm(u - u1))
+        funcval = np.append(funcval, np.abs(funcAV(A, V, v, u)))
+        funcopt = np.max(funcval)
+        up = 0
+        
+        if funcval[k_iter] == funcopt:
+            optu = u.copy()
+            optv = v.copy()
+            up = 1
+        
+        if (np.mod(k_iter,10) == 0 or 1 <= k_iter <= 10) and show == 1:
+            print(k_iter, '\t|', "%10.3e"%(funcval[k_iter]), '\t|', "%10.3e"%(np.abs(np.abs(funcval[k_iter]) - valsol)), '\t|', "%10.3e"%(tau+sig), '\t|', "%10.3e"%(a), '\t|', "%10.3e"%(b), '\t|',  "%10.3e"%(c), '\t|',  "%10.3e"%(d), '\t|', "%10.3e"%(np.linalg.norm(first_diff_AV(a,b,c,d,tau,sig))), '\t\t|', "%10.3e"%(second_diff_AV(a,b,c,d,tau,sig)), '\t\t|', up, '\t\t|', "%10.3e"%(np.linalg.norm(v1 - v) + np.linalg.norm(u1 - u)), '\t|', "%10.3e"%np.minimum(np.linalg.norm(u - np.dot(A - V.T, v)/np.linalg.norm(np.dot(A - V.T, v))), 2-np.linalg.norm(u - np.dot(A - V.T, v)/np.linalg.norm(np.dot(A - V.T, v)))))
+
+        k_iter += 1
+
+    if k_iter == 1:
+        optu = u.copy()
+        optv = v.copy()
+        print('A = V with ||A - V|| = ', "%10.7e"%np.abs(funcAV(A, V, v, u)), '\t| with b_0 + c_0 = ', "%10.7e"%(b+c))
+    else:
+        if show == 0:
+            print('iter. \t| func-value \t| residuum \t| sing-vec-error')
+            print(k_iter-1, '\t|', "%10.3e"%(funcval[k_iter-1]), '\t|', "%10.3e"%(np.abs(np.abs(funcval[k_iter-1]) - valsol)), '\t|', "%10.3e"%np.minimum(np.linalg.norm(u - np.dot(A - V.T, v)/np.linalg.norm(np.dot(A - V.T, v))), 2-np.linalg.norm(u - np.dot(A - V.T, v)/np.linalg.norm(np.dot(A - V.T, v)))))
         print('||A|| = ', np.abs(funcAV(A, V, v, u)))
 
     return u, v, valsol, optu, optv, funcval, listtau, listabcd, listbc, listerror, listapprox1, listapprox2, listapprox2min, listapprox3
